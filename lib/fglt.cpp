@@ -97,148 +97,18 @@ static void raw2net
 static void compute_all_available
 (
  double **f,
- mwIndex i,
- double *t00,
- double *t01,
- double *t04
+ mwIndex i
 ){
 
   f[0][i]   = 1;
   f[3][i]   = f[1][i] * ( f[1][i] - 1 ) * 0.5;
-  f[6][i]   = f[2][i]*t01[i] - 2*f[4][i];
-  f[8][i]   = f[1][i]*t04[i] / 3;
-  f[11][i]  = t00[i] * f[4][i];
 }
 
-static void compute_d13
-(
- double *f13_i,
- double *c3,
- mwIndex i,
- mwIndex *jStart,
- mwIndex *ii,
- int *isNgbh
- ){
-
-  for (mwIndex id_i = jStart[i]; id_i < jStart[i+1]; id_i++){
-    mwIndex k = ii[id_i];
-
-    if (c3[id_i] == 0) continue;
-
-    for (mwIndex id_k = jStart[k]; id_k < jStart[k+1]; id_k++){
-
-      // get the column (j)
-      mwIndex j = ii[id_k];
-
-      if (j > k || c3[id_k] == 0) continue;
-
-      if (isNgbh[j]) {
-        f13_i[0] += c3[id_k]-1;
-      }
-        
-    }
-      
-  }
-
-}
-
-
-static void compute_k4
-(
- double *f15,
- mwIndex i,
- mwIndex *jStart,
- mwIndex *ii,
- int *isNgbh,
- mwIndex *k4cmn
-){
-
-  // --- compute K_4
-  for (mwIndex id_i = jStart[i]; id_i < jStart[i+1]; id_i++){
-
-    // working with edge (i,j)
-    mwIndex j = ii[id_i];
-
-    if (j < i) continue;
-
-    // counter for common nodes
-    mwIndex cntCmn = 0;
-
-    // collect common
-    for (mwIndex id_j = jStart[j]; id_j < jStart[j+1]; id_j++){
-      // get the column (j)
-      mwIndex k = ii[id_j];
-
-      if (k < j) continue;
-      
-      // if common to (i) and (j) add to list
-      if (isNgbh[k]) {
-        k4cmn[cntCmn++] = k;
-        isNgbh[k] = -1;
-      }
-
-    }
-
-    // check every combination
-    for (mwIndex k_1 = 0; k_1 < cntCmn; k_1++){
-      mwIndex k = k4cmn[k_1];
-      for (mwIndex id_l = jStart[k]; id_l < jStart[k+1]; id_l++){
-        mwIndex l = ii[id_l];
-
-        if (l < k) continue;
-
-        if (isNgbh[l] == -1) {
-          f15[i]++;
-          f15[j]++;
-          f15[k]++;
-          f15[l]++;
-        }
-        
-      }
-    }
-
-    for (mwIndex k_1 = 0; k_1 < cntCmn; k_1++) isNgbh[k4cmn[k_1]] = 1;
-          
-  }
-
-  // f15_i[0] /= 6;
-  
-}
-
-static void spmv_second_pass
-(
- double *f5_i,
- double *f9_i,
- double *f2,
- double *f4,
- double *t02,
- mwIndex i,
- mwIndex *jStart,
- mwIndex *ii,
- int *isNgbh
-){
-
-  // --- loop through every nonzero element A(i,k)
-  for (mwIndex id_i = jStart[i]; id_i < jStart[i+1]; id_i++){
-    mwIndex k = ii[id_i];
-    f5_i[0] += f2[k];
-    f9_i[0] += f4[k];
-
-    isNgbh[k] = 1;
-      
-  }
-
-  f5_i[0] -= t02[i] + 2*f4[i];
-  f9_i[0] -= 2 * f4[i];
-  
-}
 
 static void spmv_first_pass
 (
  double *f2_i,
- double *f7_i,
  double *f1,
- double *t04,
  mwIndex i,
  mwIndex *jStart,
  mwIndex *ii
@@ -252,8 +122,7 @@ static void spmv_first_pass
       
     // --- matrix-vector products
     f2_i[0] += f1[k];
-    f7_i[0] += t04[k];
-      
+
   }
 
   f2_i[0]  -= f1[i];
@@ -263,11 +132,7 @@ static void spmv_first_pass
 static void p2
 (
  double *f4_i,
- double *f10_i,
- double *f12_i, 
- double *f14_i,
  double *c3,
- double *t00,
  mwIndex i,
  mwIndex *jStart,
  mwIndex *ii,
@@ -316,15 +181,11 @@ static void p2
     // get next column number (j)
     mwIndex j = pos[l];
 
-    // reduction
-    f12_i[0] += (fl[j] * (fl[j]-1) );
 
     if (isNgbh[j]) {
       c3[isNgbh[j]-1]  = fl[j];
         
       f4_i[0]  += fl[j];
-      f10_i[0] += fl[j]*t00[j];
-      f14_i[0] += (fl[j] * fl[j]);
     }
       
     // declare it non-used
@@ -332,26 +193,8 @@ static void p2
   }
 
   f4_i[0]  /= 2;
-  f12_i[0] /= 2;
-
-  f14_i[0] /= 2;
-  f14_i[0] -= f4_i[0];
     
 }
-
-static int all_nonzero
-(
- double **f,
- mwIndex i
- ){               
-
-  for (int d = 0; d < NGRAPHLET-1; d++)
-    if (f[d][i] == 0) return 0;
-
-  return 1;
-  
-}
-  
 
 
 extern "C" int compute
@@ -373,27 +216,10 @@ extern "C" int compute
 #endif
 
 
-  // --- setup helpers
-  double *t00 = (double *) calloc( n, sizeof(double) );
-  double *t01 = (double *) calloc( n, sizeof(double) );
-  double *t02 = (double *) calloc( n, sizeof(double) );
-  double *t04 = (double *) calloc( n, sizeof(double) );
-
-  if ( t00 == NULL || t01 == NULL || t02 == NULL || t04 == NULL ){
-    printf( "Working memory allocation failed at helpers, aborting...\n" );
-    return 1;
-  }
-    
-
 
   FOR (mwSize i=0;i<n;i++) {
     // get degree of vertex (i)
     f[1][i] = jStart[i+1] - jStart[i];
-    t00[i]  = f[1][i] - 2;
-    t01[i]  = f[1][i] - 1;
-    t02[i]  = f[1][i] * t01[i];
-    t04[i]  = (t00[i] * t01[i]) / 2;
-    
   }
   
   
@@ -420,20 +246,18 @@ extern "C" int compute
 
 
     // d_4 d_10 d_12 d_14
-    p2(  &f[4][i], &f[10][i], &f[12][i], &f[14][i],
-         c3, t00, i, jStart, ii,
+    p2(  &f[4][i],
+         c3, i, jStart, ii,
          &fl[ip*n], &pos[ip*n], &isNgbh[ip*n], &isUsed[ip*n] );
 
     
     // d_2 d_7
-    spmv_first_pass( &f[2][i], &f[7][i], f[1], t04, i, jStart, ii );
+    spmv_first_pass( &f[2][i], f[1], i, jStart, ii );
 
     
     // d_3 d_6 d_8 d_11
-    compute_all_available(f, i, t00, t01, t04);
+    compute_all_available(f, i);
     remove_neighbors(&isNgbh[ip*n], i, ii, jStart);
-        
-
     
   }
 
@@ -441,55 +265,7 @@ extern "C" int compute
   free(pos);
   free(isUsed);
 
-  free(t00);
-  free(t01);
-
-  free(t04);
-
-  mwIndex *k4cmn   = (mwIndex *) calloc( n*np, sizeof(mwIndex) );
-  double  *k4num   = (double *)  calloc( n*np, sizeof(mwIndex) );
-
-  if ( k4cmn == NULL || k4num == NULL ){
-    printf( "Working memory allocation failed at K_4 auxilliary vectors, aborting...\n" );
-    return 1;
-  }
-  
-  
-  // --- second pass
-  FOR (mwIndex i=0; i<n;i++) {
-#ifdef HAVE_CILK_CILK_H
-    int ip = __cilkrts_get_worker_number();
-#else
-    int ip = 0;
-#endif
-
-    
-    // d_5 d_9
-    spmv_second_pass( &f[5][i], &f[9][i], f[2], f[4], t02, i, jStart, ii, &isNgbh[ip*n] );
-
-    
-    // d_13
-    compute_d13( &f[13][i], c3, i, jStart, ii, &isNgbh[ip*n] );
-
-    
-    // d_15 (only if all others are nonzero)
-    if ( all_nonzero(f, i) )
-      compute_k4( &k4num[ip*n], i, jStart, ii,
-                  &isNgbh[ip*n], &k4cmn[ip*n] );    
-    
-    remove_neighbors(&isNgbh[ip*n], i, ii, jStart);
-    
-    
-    
-  }
-
-  // merge k4 counts
   FOR (mwIndex i=0; i<n;i++){
-
-    
-    for (mwIndex it=0; it<np;it++)
-      f[15][i] += k4num[it*n + i];
-
     
     // transform to net
     raw2net( (double ** const) fn, (double const ** const) f, i );
@@ -498,10 +274,6 @@ extern "C" int compute
   }
   
   free(isNgbh);
-  free(k4cmn);
-  free(k4num);
-
-  free(t02);
   free(c3);
 
 #ifdef CILKSCALE
